@@ -1,9 +1,5 @@
-﻿
-
-
-
-
-using System.Diagnostics;
+﻿using System.Diagnostics;
+using System.Text;
 using System.Threading;
 
 namespace MultiThreading
@@ -109,50 +105,65 @@ namespace MultiThreading
         }
     }
 
-    class RandomThreadProcessor
+    abstract class TaskProcessorBase<T>
     {
-        private readonly Random[] _randoms;
-        private readonly Thread[] _threads;
-        private readonly int[] _array;
+        protected readonly T[] _array;
 
-        public RandomThreadProcessor(int[] array, int threadCount)
+        protected readonly int _taskCount;
+        protected readonly CancellationToken _token;
+
+        public TaskProcessorBase(T[] array, int taskCount, CancellationToken token)
+        {
+            _array = array;
+            _taskCount = taskCount;
+            _token = token;
+        }
+
+        public virtual Task Run()
+        {
+            var tasks = new Task[_taskCount];
+            for (int i = 0; i < tasks.Length; i++)
+            {
+                var num = i;
+                tasks[i] = Task.Run(() => Process(num), _token);
+            }
+
+            return Task.WhenAll(tasks);
+        }
+
+        protected abstract void Process(int num);
+    }
+
+    abstract class RandomTaskProcessor<T> : TaskProcessorBase<T>
+    {
+        protected readonly Random[] _randoms;
+
+        protected RandomTaskProcessor(T[] array, int taskCount, CancellationToken token)
+            : base(array, taskCount, token)
         {
             var random = new Random();
-            _randoms = new Random[threadCount];
-            for (int i = 0; i < threadCount; i++)
+            _randoms = new Random[taskCount];
+            for (int i = 0; i < taskCount; i++)
             {
                 _randoms[i] = new Random(random.Next());
             }
+        }
+    }
 
-            _threads = new Thread[threadCount];
-            _array = array;
+    class RandomIntTaskProcessor : RandomTaskProcessor<int>
+    {
+        public RandomIntTaskProcessor(int[] array, int threadCount, CancellationToken token)
+            : base(array, threadCount, token)
+        {
         }
 
-        public void Run()
+        protected override void Process(int num)
         {
-            for (int i = 0; i < _threads.Length; i++)
-            {
-                _threads[i] = new Thread(Process);
-            }
+            if (_token.IsCancellationRequested) return;
 
-            for (int i = 0; i < _threads.Length; i++)
-            {
-                _threads[i].Start(i);
-            }
-
-            for (int i = 0; i < _threads.Length; i++)
-            {
-                _threads[i].Join();
-            }
-        }
-
-        private void Process(object? threadNumber)
-        {
-            var itemsByThread = _array.Length / _threads.Length;
-            var num = (int)threadNumber;
-
+            var itemsByThread = _array.Length / _taskCount;
             var span =
-                num == _threads.Length - 1
+                num == _taskCount - 1
                    ? _array[(num * itemsByThread)..]
                    : _array.AsSpan(num * itemsByThread, itemsByThread);
 
@@ -160,42 +171,121 @@ namespace MultiThreading
 
             for (int i = 0; i < span.Length; i++)
             {
+                if (_token.IsCancellationRequested) return;
+
                 span[i] = random.Next();
             }
         }
     }
 
+    class RandomTaskWordProcessor : RandomTaskProcessor<string>
+    {
+        public RandomTaskWordProcessor(string[] array, int taskCount, CancellationToken token)
+            : base(array, taskCount, token)
+        {
+        }
+
+        protected override void Process(int num)
+        {
+            if (_token.IsCancellationRequested) return;
+
+            var itemsByThread = _array.Length / _taskCount;
+            var span =
+                num == _taskCount - 1
+                   ? _array[(num * itemsByThread)..]
+                   : _array.AsSpan(num * itemsByThread, itemsByThread);
+
+            var random = _randoms[num];
+
+            for (int i = 0; i < span.Length; i++)
+            {
+                if (_token.IsCancellationRequested) return;
+
+                var bytes = new byte[random.Next(2, 11)];
+                random.NextBytes(bytes);
+                span[i] = Encoding.ASCII.GetString(bytes);
+            }
+        }
+    }
+
+    class SumTaskProcessor : TaskProcessorBase<int>
+    {
+        private long[] _results;
+
+        public SumTaskProcessor(int[] array, int taskCount, CancellationToken token)
+            : base(array, taskCount, token)
+        {
+             _results = new long[_taskCount];
+        }
+
+        protected override void Process(int num)
+        {
+            if (_token.IsCancellationRequested) return;
+
+            var itemsByThread = _array.Length / _taskCount;
+            var span =
+                num == _taskCount - 1
+                   ? _array[(num * itemsByThread)..]
+                   : _array.AsSpan(num * itemsByThread, itemsByThread);
+
+            for (int i = 0; i < span.Length; i++)
+            {
+                if (_token.IsCancellationRequested) return;
+
+                _results[num] += span[i];
+            }
+        }
+
+        public override Task Run()
+        {
+           return base.Run().ContinueWith(t => _results.Sum(), _token);
+        }
+    }
+
     internal class Program
     {
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
-            //1. 1 - 0.6329866
-            //2. 1 - 00:00:00.6115480
-            //3. 1 - 00:00:00.6116033
+            var cancellationTokenSource = new CancellationTokenSource();
 
-            //2 - 00:00:00.3768524
-            //2 - 00:00:00.3738134
-            //2 - 00:00:00.3749054
+            var cancelTask = Task.Run(() =>
+            {
+                while (!cancellationTokenSource.IsCancellationRequested)
+                {
+                    var k = Console.ReadKey();
+                    if (k.Key == ConsoleKey.Escape)
+                    {
+                        cancellationTokenSource.Cancel();
+                    }
+                }
+            });
 
-            //4 - 00:00:00.2428593
+            Console.WriteLine("Run word generator!");
+            var words = new string[1_000_000];
+            var generator = new RandomTaskWordProcessor(words, 4, cancellationTokenSource.Token);
+            var wordGenTask = generator.Run();
 
-            //8 - 00:00:00.1811266
-
-            //16 - 00:00:00.1261678
-
-            //32 - 00:00:00.1107846
-
-            //64 - 00:00:00.1059993
-
-
-            var sw = Stopwatch.StartNew();
-
+            Console.WriteLine("Run int generator!");
             var arr = new int[100_000_000];
-            var randomProc = new RandomThreadProcessor(arr, 1024);
-            randomProc.Run();
+            var randomProc = new RandomIntTaskProcessor(arr, 6, cancellationTokenSource.Token);
+            var intGenTask = randomProc.Run();
 
-            sw.Stop();
-            Console.WriteLine(sw.Elapsed.ToString());
+            await intGenTask;
+
+            var sumProcessor = new SumTaskProcessor(arr, 4, cancellationTokenSource.Token);
+            var sumTask = (Task<long>)sumProcessor.Run();
+
+            await Task.WhenAll(sumTask, wordGenTask);
+
+            Console.WriteLine(sumTask.Result);
+            Console.WriteLine("Done");
+
+
+            var t = GetLines();
+
+            Console.WriteLine("Do Somthing");
+
+            var lines = await t;
 
 
             /*var lamps = new Lamp[]
@@ -212,6 +302,23 @@ namespace MultiThreading
 
             var manager = new LampSwitchManager(lamps);
             manager.Run();*/
+        }
+
+
+        static async Task<string[]> GetLines()
+        {
+            var task = File.ReadAllLinesAsync("text.txt");
+
+            Console.WriteLine("Start reading");
+
+            var lines = await task;
+
+            foreach (var item in lines)
+            {
+                Console.WriteLine("do something with lines");
+            }
+
+            return lines;
         }
     }
 }
