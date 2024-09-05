@@ -4,107 +4,6 @@ using System.Threading;
 
 namespace MultiThreading
 {
-    class Lamp
-    {
-        private readonly static object _lock = new object();
-
-        private readonly int x;
-        private readonly int y;
-        private readonly ConsoleColor color;
-        private readonly int timeOn;
-        private readonly int timeOff;
-
-        private bool isOn = false;
-        private Thread _thread;
-
-        public Lamp(int x, int y, ConsoleColor color, int timeOn, int timeOff)
-        {
-            this.x = x;
-            this.y = y;
-            this.color = color;
-            this.timeOn = timeOn;
-            this.timeOff = timeOff;
-        }
-
-        public void Toggle()
-        {
-            if (isOn)
-            {
-                isOn = false;
-            }
-            else
-            {
-                isOn = true;
-            }
-
-            Show();
-        }
-
-        private void Show()
-        {
-            lock (_lock)
-            {
-                Console.CursorVisible = false;
-                Console.ResetColor();
-                Console.SetCursorPosition(x, y);
-                if (isOn) Console.BackgroundColor = color;
-                Console.WriteLine(" ");
-            }
-        }
-
-        public void Run()
-        {
-            _thread = new Thread(InnerRun)
-            {
-                IsBackground = true,
-                Name = color.ToString() + " Thread"
-            };
-
-            _thread.Start();
-        }
-
-        private void InnerRun()
-        {
-            while (true)
-            {
-                if (isOn)
-                {
-                    Thread.Sleep(timeOn);
-                    Toggle();
-                }
-                else
-                {
-                    Thread.Sleep(timeOff);
-                    Toggle();
-                }
-            }
-        }
-
-        public void Wait()
-        {
-            _thread.Join();
-        }
-    }
-
-    class LampSwitchManager
-    {
-        private readonly Lamp[] _lamps;
-
-        public LampSwitchManager(Lamp[] lamps)
-        {
-            this._lamps = lamps;
-        }
-
-        public void Run()
-        {
-            foreach (var lamp in _lamps)
-                lamp.Run();
-
-            foreach (var lamp in _lamps)
-                lamp.Wait();
-        }
-    }
-
     abstract class TaskProcessorBase<T>
     {
         protected readonly T[] _array;
@@ -215,7 +114,7 @@ namespace MultiThreading
         public SumTaskProcessor(int[] array, int taskCount, CancellationToken token)
             : base(array, taskCount, token)
         {
-             _results = new long[_taskCount];
+            _results = new long[_taskCount];
         }
 
         protected override void Process(int num)
@@ -238,7 +137,7 @@ namespace MultiThreading
 
         public override Task Run()
         {
-           return base.Run().ContinueWith(t => _results.Sum(), _token);
+            return base.Run().ContinueWith(t => _results.Sum(), _token);
         }
     }
 
@@ -260,10 +159,10 @@ namespace MultiThreading
                 }
             });
 
-            Console.WriteLine("Run word generator!");
-            var words = new string[1_000_000];
-            var generator = new RandomTaskWordProcessor(words, 4, cancellationTokenSource.Token);
-            var wordGenTask = generator.Run();
+            //Console.WriteLine("Run word generator!");
+            //var words = new string[1_000_000];
+            //var generator = new RandomTaskWordProcessor(words, 4, cancellationTokenSource.Token);
+            //var wordGenTask = generator.Run();
 
             Console.WriteLine("Run int generator!");
             var arr = new int[100_000_000];
@@ -272,20 +171,41 @@ namespace MultiThreading
 
             await intGenTask;
 
+            Console.WriteLine("Start parallel");
+
+            //var listLock = new object();
+            //var bag = new System.Collections.Concurrent.ConcurrentBag<long>();
+
+            //Parallel.ForEach(arr
+            //    , new ParallelOptions { CancellationToken = cancellationTokenSource.Token }
+            //    , item =>
+            //    {
+            //        if (item % 2 == 0)
+            //        {
+            //            bag.Add(item);
+            //        }
+            //    }
+            //);
+
+            var bag = arr.AsParallel().Where(i => i % 2 == 0).ToList();
+
+            Console.WriteLine("Start class");
+
             var sumProcessor = new SumTaskProcessor(arr, 4, cancellationTokenSource.Token);
             var sumTask = (Task<long>)sumProcessor.Run();
 
-            await Task.WhenAll(sumTask, wordGenTask);
+            await Task.WhenAll(sumTask/*, wordGenTask*/);
 
+            Console.WriteLine(bag.Count);
             Console.WriteLine(sumTask.Result);
             Console.WriteLine("Done");
 
 
-            var t = GetLines();
+            //var t = GetLines();
 
-            Console.WriteLine("Do Somthing");
+            //Console.WriteLine("Do Somthing");
 
-            var lines = await t;
+            //var lines = await t;
 
 
             /*var lamps = new Lamp[]
